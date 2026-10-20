@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generator & Solver Labirin</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #1a1a2e; color: #eee; padding: 20px;
+  }
+  h1 { margin-bottom: 12px; font-size: 1.8rem; }
+  .controls { display: flex; gap: 12px; margin-bottom: 16px; }
+  button {
+    font-size: 1rem; font-weight: 600; padding: 10px 24px; border: none; border-radius: 10px;
+    cursor: pointer; transition: transform .1s;
+  }
+  button:active { transform: scale(.96); }
+  #btn-generate { background: #e94560; color: #fff; }
+  #btn-solve { background: #0f3460; color: #fff; }
+  canvas { border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.5); background: #0d0d1a; }
+  #status { margin-top: 12px; color: #aaa; min-height: 1.4em; }
+</style>
+</head>
+<body>
+<h1>🌀 Generator & Solver Labirin</h1>
+<div class="controls">
+  <button id="btn-generate">🔀 Generate Ulang</button>
+  <button id="btn-solve">🧭 Solve (BFS)</button>
+</div>
+<canvas id="maze"></canvas>
+<div id="status"></div>
+<script>
+const COLS = 21, ROWS = 21;
+const CELL = 22;
+const canvas = document.getElementById('maze');
+const ctx = canvas.getContext('2d');
+canvas.width = COLS * CELL;
+canvas.height = ROWS * CELL;
+const statusEl = document.getElementById('status');
+
+let grid, visitedGen, solving = false, solveTimer = null;
+
+// Tiap sel: {x, y, walls: {top, right, bottom, left}}
+function createGrid() {
+  const g = [];
+  for (let y = 0; y < ROWS; y++) {
+    const row = [];
+    for (let x = 0; x < COLS; x++) {
+      row.push({ x, y, walls: { top: true, right: true, bottom: true, left: true } });
+    }
+    g.push(row);
+  }
+  return g;
+}
+
+// Recursive backtracker (iteratif dengan stack)
+function generateMaze() {
+  grid = createGrid();
+  const stack = [grid[0][0]];
+  const seen = new Set(['0,0']);
+  const dirs = [
+    { dx: 0, dy: -1, wall: 'top', opp: 'bottom' },
+    { dx: 1, dy: 0, wall: 'right', opp: 'left' },
+    { dx: 0, dy: 1, wall: 'bottom', opp: 'top' },
+    { dx: -1, dy: 0, wall: 'left', opp: 'right' }
+  ];
+  while (stack.length) {
+    const cur = stack[stack.length - 1];
+    const neighbors = [];
+    for (const d of dirs) {
+      const nx = cur.x + d.dx, ny = cur.y + d.dy;
+      if (nx >= 0 && ny >= 0 && nx < COLS && ny < ROWS && !seen.has(nx + ',' + ny)) {
+        neighbors.push({ cell: grid[ny][nx], dir: d });
+      }
+    }
+    if (!neighbors.length) { stack.pop(); continue; }
+    const pick = neighbors[Math.floor(Math.random() * neighbors.length)];
+    cur.walls[pick.dir.wall] = false;
+    pick.cell.walls[pick.dir.opp] = false;
+    seen.add(pick.cell.x + ',' + pick.cell.y);
+    stack.push(pick.cell);
+  }
+}
+
+function drawCell(x, y, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+}
+
+function drawMaze() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#0d0d1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#533483'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const c = grid[y][x], px = x * CELL, py = y * CELL;
+      if (c.walls.top) { ctx.moveTo(px, py); ctx.lineTo(px + CELL, py); }
+      if (c.walls.right) { ctx.moveTo(px + CELL, py); ctx.lineTo(px + CELL, py + CELL); }
+      if (c.walls.bottom) { ctx.moveTo(px, py + CELL); ctx.lineTo(px + CELL, py + CELL); }
+      if (c.walls.left) { ctx.moveTo(px, py); ctx.lineTo(px, py + CELL); }
+    }
+  }
+  ctx.stroke();
+  drawCell(0, 0, '#00d26a');                       // start (hijau)
+  drawCell(COLS - 1, ROWS - 1, '#e94560');        // finish (merah)
+}
+
+function neighborsOf(cell) {
+  const out = [];
+  const { x, y, walls } = cell;
+  if (!walls.top && y > 0) out.push(grid[y - 1][x]);
+  if (!walls.right && x < COLS - 1) out.push(grid[y][x + 1]);
+  if (!walls.bottom && y < ROWS - 1) out.push(grid[y + 1][x]);
+  if (!walls.left && x > 0) out.push(grid[y][x - 1]);
+  return out;
+}
+
+function bfsPath() {
+  const start = grid[0][0], goal = grid[ROWS - 1][COLS - 1];
+  const queue = [start];
+  const prev = new Map();
+  const seen = new Set(['0,0']);
+  const order = [start];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur === goal) break;
+    for (const nb of neighborsOf(cur)) {
+      const key = nb.x + ',' + nb.y;
+      if (!seen.has(key)) {
+        seen.add(key); prev.set(key, cur);
+        queue.push(nb); order.push(nb);
+      }
+    }
+  }
+  // Rekonstruksi jalur
+  const path = [];
+  let cur = goal;
+  const gk = (COLS - 1) + ',' + (ROWS - 1);
+  if (!seen.has(gk)) return { order, path: [] };
+  while (cur) {
+    path.unshift(cur);
+    const key = cur.x + ',' + cur.y;
+    cur = prev.get(key) || null;
+  }
+  return { order, path };
+}
+
+function solve() {
+  if (solving) return;
+  solving = true;
+  statusEl.textContent = 'Menyelesaikan dengan BFS...';
+  drawMaze();
+  const { order, path } = bfsPath();
+  let i = 0;
+  solveTimer = setInterval(() => {
+    if (i < order.length) {
+      const c = order[i];
+      if (!(c.x === 0 && c.y === 0) && !(c.x === COLS - 1 && c.y === ROWS - 1)) {
+        drawCell(c.x, c.y, '#16213e');
+      }
+      i++;
+    } else {
+      clearInterval(solveTimer);
+      // Gambar jalur akhir (kuning)
+      for (const c of path) {
+        if (!(c.x === 0 && c.y === 0) && !(c.x === COLS - 1 && c.y === ROWS - 1)) {
+          drawCell(c.x, c.y, '#f5c518');
+        }
+      }
+      statusEl.textContent = 'Selesai! Jalur terpendek: ' + (path.length - 1) + ' langkah.';
+      solving = false;
+    }
+  }, 12);
+}
+
+document.getElementById('btn-generate').addEventListener('click', () => {
+  if (solving) { clearInterval(solveTimer); solving = false; }
+  generateMaze();
+  drawMaze();
+  statusEl.textContent = 'Labirin baru dibuat. Klik Solve untuk mencari jalan.';
+});
+
+document.getElementById('btn-solve').addEventListener('click', solve);
+
+generateMaze();
+drawMaze();
+statusEl.textContent = 'Klik Solve untuk mencari jalan dari hijau ke merah.';
+</script>
+</body>
+</html>
